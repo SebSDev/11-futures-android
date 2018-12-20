@@ -42,6 +42,7 @@ dependencies {
     /* Retrofit */
     implementation "com.squareup.retrofit2:retrofit:$retrofit2_version"
     implementation "com.squareup.retrofit2:converter-gson:$retrofit2_version"
+    implementation "com.squareup.retrofit2:adapter-java8:$retrofit2_version"
 
     /* JUnit 5 */
     testImplementation junit5.unitTests()

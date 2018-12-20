@@ -22,15 +22,21 @@ import com.mikepenz.iconics.IconicsDrawable;
 import com.mikepenz.iconics.context.IconicsLayoutInflater2;
 
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
 import de.fhro.inf.prg3.a11.openmensa.OpenMensaAPI;
 import de.fhro.inf.prg3.a11.openmensa.OpenMensaAPIService;
 import de.fhro.inf.prg3.a11.adapter.MealsRecyclerAdapter;
 import de.fhro.inf.prg3.a11.openmensa.model.Canteen;
 import de.fhro.inf.prg3.a11.openmensa.model.Meal;
+import de.fhro.inf.prg3.a11.openmensa.model.PageInfo;
+import retrofit2.Response;
 
 public class MainActivity extends AppCompatActivity implements DatePickerDialog.OnDateSetListener, AdapterView.OnItemSelectedListener {
 
@@ -46,6 +52,8 @@ public class MainActivity extends AppCompatActivity implements DatePickerDialog.
     private ArrayAdapter<Canteen> canteenAdapter;
     private MealsRecyclerAdapter mealsListAdapter;
 
+    private Canteen selectedCanteen;
+
     public MainActivity() {
         dateFormat = new SimpleDateFormat(OPEN_MENSA_DATE_FORMAT, Locale.getDefault());
         currentDate = Calendar.getInstance();
@@ -59,7 +67,16 @@ public class MainActivity extends AppCompatActivity implements DatePickerDialog.
         setContentView(R.layout.activity_main);
 
         dateDisplayView = findViewById(R.id.date_display_view);
-        updateDateDisplay();
+        try
+        {
+            updateDateDisplay();
+        } catch (ExecutionException e)
+        {
+            e.printStackTrace();
+        } catch (InterruptedException e)
+        {
+            e.printStackTrace();
+        }
 
         /* setup canteen selection spinner */
         canteenAdapter = new ArrayAdapter<>(this, R.layout.list_item);
@@ -73,7 +90,16 @@ public class MainActivity extends AppCompatActivity implements DatePickerDialog.
         mealsListView.setLayoutManager(new LinearLayoutManager(this));
         mealsListView.setAdapter(mealsListAdapter);
 
-        initCanteensSpinner();
+        try
+        {
+            initCanteensSpinner();
+        } catch (ExecutionException e)
+        {
+            e.printStackTrace();
+        } catch (InterruptedException e)
+        {
+            e.printStackTrace();
+        }
     }
 
     /**
@@ -119,7 +145,16 @@ public class MainActivity extends AppCompatActivity implements DatePickerDialog.
     @Override
     public void onDateSet(DatePicker view, int year, int month, int dayOfMonth) {
         currentDate.set(year, month, dayOfMonth);
-        updateDateDisplay();
+        try
+        {
+            updateDateDisplay();
+        } catch (ExecutionException e)
+        {
+            e.printStackTrace();
+        } catch (InterruptedException e)
+        {
+            e.printStackTrace();
+        }
     }
 
     /**
@@ -129,7 +164,19 @@ public class MainActivity extends AppCompatActivity implements DatePickerDialog.
      */
     @Override
     public void onItemSelected(AdapterView<?> adapterView, View view, int position, long id) {
-        /* TODO Trigger updating of displayed meals as another canteen is now selected */
+        /* Trigger updating of displayed meals as another canteen is now selected */
+        selectedCanteen = canteenAdapter.getItem(position);
+        try
+        {
+            updateMeals();
+        } catch (ExecutionException e)
+        {
+            e.printStackTrace();
+        } catch (InterruptedException e)
+        {
+            e.printStackTrace();
+        }
+
     }
 
     @Override
@@ -141,27 +188,97 @@ public class MainActivity extends AppCompatActivity implements DatePickerDialog.
         ).show();
     }
 
-    private void initCanteensSpinner() {
-        /* TODO load all canteens and pass them to the canteenAdapter instance
+    private void initCanteensSpinner() throws ExecutionException, InterruptedException
+    {
+        /*
          * hint: the first page is loaded without an index
          * afterwards you have to load the remaining pages with an index
          * use the given utility class PageInfo to get the total number of pages
          * you can create a PageInfo object by passing the return value `Response<T>`
          * you get when you fetch the first page to the static method `extractFromResponse(...)`
          * of the PageInfo class */
+
+        openMensaAPI.getCanteens()
+        .thenApplyAsync(response -> PageInfo.extractFromResponse(response))
+        .thenApplyAsync(pageInfo ->
+            {
+                List<Canteen> canteens = new LinkedList<>();
+
+                for (int i = 1; i <= pageInfo.getTotalCountOfPages(); i++)
+                {
+                    try
+                    {
+                        openMensaAPI.getCanteens(i)
+                                .thenAcceptAsync(receivedCanteens -> canteens.addAll(receivedCanteens))
+                                    .get();
+                    } catch (InterruptedException e)
+                    {
+                        e.printStackTrace();
+                    } catch (ExecutionException e)
+                    {
+                        e.printStackTrace();
+                    }
+                }
+
+                return canteens;
+            }
+        )
+        .thenAcceptAsync(canteens -> canteenAdapter.addAll(canteens))
+        .get();
+
+
+        Toast.makeText(
+                this,
+                "Initialization of canteens complete!",
+                Toast.LENGTH_LONG
+        ).show();
     }
 
     /**
      * Helper method to update the currently selected date
      */
-    private void updateDateDisplay() {
+    private void updateDateDisplay() throws ExecutionException, InterruptedException
+    {
         dateDisplayView.setText(String.format("Currently selected %s", dateFormat.format(currentDate.getTime())));
         updateMeals();
     }
 
-    private void updateMeals() {
+    private void updateMeals() throws ExecutionException, InterruptedException
+    {
         final String dateString = dateFormat.format(currentDate.getTime());
 
-        /* TODO load meals and pass them to the helper method `updateMealsListView(...)` to update the view */
+        if (selectedCanteen != null)
+        {
+            openMensaAPI.getCanteenState(selectedCanteen.getId(), dateString)
+            .thenApplyAsync(state ->
+            {
+                List<Meal> meals = null;
+
+                if (state.isClosed())
+                {
+                    meals = new LinkedList<>();
+                }
+                else
+                {
+                    try
+                    {
+                        meals = openMensaAPI.getMeals(selectedCanteen.getId(), dateString).get();
+                    } catch (InterruptedException e)
+                    {
+                        e.printStackTrace();
+                    } catch (ExecutionException e)
+                    {
+                        e.printStackTrace();
+                    }
+                }
+
+                return meals;
+            })
+            .thenAcceptAsync(m ->
+            {
+                mealsListAdapter.clear();
+                mealsListAdapter.addAll(m);
+            }).get();
+        }
     }
 }
